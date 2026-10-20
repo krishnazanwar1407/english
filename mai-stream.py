@@ -27,17 +27,23 @@ def speech_recognize_continuous_from_file():
 
     done = threading.Event()
 
-    def stop_cb(evt):
-        print("CLOSING on {}".format(evt))
+    def on_canceled(evt):
+        details = evt.cancellation_details
+        print("CANCELED")
+        print("  reason:        {}".format(details.reason))
+        print("  error_code:    {}".format(details.error_code))
+        print("  error_details: {}".format(details.error_details))
         done.set()
 
-    speech_recognizer.recognizing.connect(lambda evt: print("RECOGNIZING: {}".format(evt)))
-    speech_recognizer.recognized.connect(lambda evt: print("RECOGNIZED: {}".format(evt)))
-    speech_recognizer.session_started.connect(lambda evt: print("SESSION STARTED: {}".format(evt)))
-    speech_recognizer.session_stopped.connect(lambda evt: print("SESSION STOPPED: {}".format(evt)))
-    speech_recognizer.canceled.connect(lambda evt: print("CANCELED: {}".format(evt)))
-    speech_recognizer.session_stopped.connect(stop_cb)
-    speech_recognizer.canceled.connect(stop_cb)
+    def on_session_stopped(evt):
+        print("SESSION STOPPED")
+        done.set()
+
+    speech_recognizer.recognizing.connect(lambda evt: print("RECOGNIZING: {}".format(evt.result.text)))
+    speech_recognizer.recognized.connect(lambda evt: print("RECOGNIZED: {}".format(evt.result.text)))
+    speech_recognizer.session_started.connect(lambda evt: print("SESSION STARTED"))
+    speech_recognizer.session_stopped.connect(on_session_stopped)
+    speech_recognizer.canceled.connect(on_canceled)
 
     speech_recognizer.start_continuous_recognition()
     done.wait()
