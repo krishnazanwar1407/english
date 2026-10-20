@@ -28,10 +28,10 @@ def speech_recognize_continuous_from_file():
     done = threading.Event()
 
     def on_canceled(evt):
-        details = evt.cancellation_details
+        details = speechsdk.CancellationDetails(evt.result)
         print("CANCELED")
         print("  reason:        {}".format(details.reason))
-        print("  error_code:    {}".format(details.error_code))
+        print("  code:          {}".format(details.code))
         print("  error_details: {}".format(details.error_details))
         done.set()
 
