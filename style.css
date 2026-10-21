@@ -1,0 +1,77 @@
+:root {
+  --text: #1f2328;
+  --muted: #6e7781;
+  --accent: #0969da;
+  --danger: #cf222e;
+  --background: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e6edf3;
+    --muted: #8d96a0;
+    --accent: #4493f8;
+    --danger: #f85149;
+    --background: #0d1117;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+button {
+  font-size: 1rem;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button.listening {
+  background: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+#transcript p {
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+
+.speaker {
+  font-weight: 600;
+}
+
+.time {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.partial {
+  color: var(--muted);
+  font-style: italic;
+}

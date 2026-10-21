@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Transcription</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Live Transcription</h1>
+
+    <button id="mic-button" type="button">Start listening</button>
+    <p id="status" class="status">Idle</p>
+
+    <section id="transcript" aria-live="polite"></section>
+    <p id="partial" class="partial"></p>
+  </main>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
