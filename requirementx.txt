@@ -13,4 +13,4 @@ uvicorn                        0.54.0
 websockets                     17.3
 
 
-curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" http://127.0.0.1:8000/transcribe/mic
+curl -i -N --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" https://-seal-085-vscode-last-50001.devpod-wp04-glb.azpriv-cloud.ubs.net/proxy/8000/transcribe/mic
