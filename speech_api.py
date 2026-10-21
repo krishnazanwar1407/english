@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import tempfile
 
@@ -12,15 +13,17 @@ from azure_stt_diarization_fn import format_time
 SPEECH_ENDPOINT = ""
 SPEECH_KEY = ""
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("speech_api")
 
 app = FastAPI()
 
 
-def make_transcriber(audio_config, language, loop, queue):
+def make_transcriber(audio_config, language, loop, queue, label):
     """Build a ConversationTranscriber whose SDK callbacks push items onto an asyncio queue.
 
     The SDK fires callbacks on its own threads, so every push goes through call_soon_threadsafe.
-    A None item means the session is over.
+    A None item means the session is over. `label` is only used in log lines.
     """
     speech_config = speechsdk.SpeechConfig(endpoint=SPEECH_ENDPOINT, subscription=SPEECH_KEY)
     speech_config.speech_recognition_language = language
@@ -28,22 +31,30 @@ def make_transcriber(audio_config, language, loop, queue):
         speech_config=speech_config, audio_config=audio_config
     )
     speaker_labels = {}
+    counts = {"partial": 0, "final": 0}
 
     def push(item):
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
+    def on_session_started(evt):
+        log.info("[%s] Azure session started (session_id=%s)", label, evt.session_id)
+
     def on_transcribing(evt):
         if evt.result.text:
+            counts["partial"] += 1
             push({"type": "partial", "text": evt.result.text})
 
     def on_transcribed(evt):
         if not evt.result.text:
+            log.info("[%s] Azure returned an empty final result (silence or noise)", label)
             return
+        counts["final"] += 1
         speaker_id = evt.result.speaker_id
         if speaker_id not in speaker_labels:
             speaker_labels[speaker_id] = f"Speaker {len(speaker_labels)}"
         start_ms = evt.result.offset // 10_000
         end_ms = (evt.result.offset + evt.result.duration) // 10_000
+        log.info("[%s] final #%d %s: %s", label, counts["final"], speaker_labels[speaker_id], evt.result.text)
         push({
             "type": "final",
             "speaker": speaker_labels[speaker_id],
@@ -53,15 +64,24 @@ def make_transcriber(audio_config, language, loop, queue):
         })
 
     def on_canceled(evt):
-        # EndOfStream is the normal way a finished file or closed mic stream ends, so only real errors are reported.
-        if evt.cancellation_details.reason == speechsdk.CancellationReason.Error:
-            push({"type": "error", "text": evt.cancellation_details.error_details})
+        details = evt.cancellation_details
+        # Always log the reason, so a silent failure still shows up in the server console.
+        log.warning("[%s] Azure canceled: reason=%s error_code=%s details=%s",
+                    label, details.reason, details.error_code, details.error_details)
+        # EndOfStream is the normal way a finished file or closed mic stream ends, so only real errors reach the page.
+        if details.reason == speechsdk.CancellationReason.Error:
+            push({"type": "error", "text": details.error_details})
         push(None)
 
+    def on_session_stopped(evt):
+        log.info("[%s] Azure session stopped: %d partial, %d final results", label, counts["partial"], counts["final"])
+        push(None)
+
+    transcriber.session_started.connect(on_session_started)
     transcriber.transcribing.connect(on_transcribing)
     transcriber.transcribed.connect(on_transcribed)
     transcriber.canceled.connect(on_canceled)
-    transcriber.session_stopped.connect(lambda evt: push(None))
+    transcriber.session_stopped.connect(on_session_stopped)
     return transcriber
 
 
@@ -77,11 +97,12 @@ async def transcribe_file(file: UploadFile, language: str = "en-US"):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         path = tmp.name
+    log.info("[file] received %s (%d bytes)", file.filename, os.path.getsize(path))
 
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
     audio_config = speechsdk.audio.AudioConfig(filename=path)
-    transcriber = make_transcriber(audio_config, language, loop, queue)
+    transcriber = make_transcriber(audio_config, language, loop, queue, "file")
 
     async def events():
         finished = False
@@ -92,7 +113,7 @@ async def transcribe_file(file: UploadFile, language: str = "en-US"):
             finished = True
         finally:
             if not finished:
-                # Client disconnected mid-file: stop the SDK so it stops reading the file.
+                log.info("[file] client disconnected mid-file, stopping SDK")
                 await asyncio.to_thread(transcriber.stop_transcribing_async().get)
             try:
                 os.remove(path)
@@ -110,32 +131,53 @@ async def transcribe_mic(websocket: WebSocket, language: str = "en-US"):
     The client sends binary frames of audio, then the text message "end" when it is done.
     """
     await websocket.accept()
+    log.info("[mic] client connected from %s", websocket.client)
 
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
     stream_format = speechsdk.audio.AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1)
     push_stream = speechsdk.audio.PushAudioInputStream(stream_format=stream_format)
     audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
-    transcriber = make_transcriber(audio_config, language, loop, queue)
+    transcriber = make_transcriber(audio_config, language, loop, queue, "mic")
 
     async def sender():
+        sent = 0
         while (item := await queue.get()) is not None:
             await websocket.send_json(item)
+            sent += 1
+        log.info("[mic] sent %d messages back to the browser", sent)
 
     send_task = asyncio.create_task(sender())
+    chunks = 0
+    total_bytes = 0
     try:
         await asyncio.to_thread(transcriber.start_transcribing_async().get)
+        log.info("[mic] Azure transcriber started, waiting for audio")
         while True:
             message = await websocket.receive()
-            if message["type"] == "websocket.disconnect" or message.get("text") == "end":
+            if message["type"] == "websocket.disconnect":
+                log.info("[mic] browser disconnected after %d chunks (%d bytes)", chunks, total_bytes)
                 break
-            if message.get("bytes"):
-                push_stream.write(message["bytes"])
+            if message.get("text") == "end":
+                log.info("[mic] browser sent end after %d chunks (%d bytes)", chunks, total_bytes)
+                break
+            data = message.get("bytes")
+            if data:
+                chunks += 1
+                total_bytes += len(data)
+                if chunks == 1:
+                    log.info("[mic] first audio chunk received: %d bytes", len(data))
+                elif chunks % 50 == 0:
+                    log.info("[mic] %d chunks received so far (%d bytes)", chunks, total_bytes)
+                push_stream.write(data)
         # Closing the push stream tells Azure no more audio is coming; it flushes the rest and
         # fires session_stopped, which ends the sender.
         push_stream.close()
         await asyncio.wait_for(send_task, timeout=30)
         await websocket.close()
+    except Exception:
+        log.exception("[mic] unexpected error")
+        raise
     finally:
         # Closing the push stream ends the SDK session on its own. Calling stop_transcribing after
         # that never returned in testing, so we don't call it here.
