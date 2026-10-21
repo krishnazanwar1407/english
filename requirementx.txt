@@ -11,3 +11,6 @@ PyYAML                         6.0.3
 threadpoolctl                  3.7.0
 uvicorn                        0.54.0
 websockets                     17.3
+
+
+curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" http://127.0.0.1:8000/transcribe/mic
