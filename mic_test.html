@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mic transcription test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 720px; }
+    button { font-size: 1rem; padding: .5rem 1rem; margin-right: .5rem; }
+    #out p { margin: .4rem 0; }
+    .speaker { font-weight: 600; }
+    .time { color: #888; font-size: .85rem; }
+    .partial { color: #888; font-style: italic; }
+    .error { color: #c00; }
+  </style>
+</head>
+<body>
+  <h2>Mic → text</h2>
+  <button id="start">Start</button>
+  <button id="stop" disabled>Stop</button>
+  <div id="out"></div>
+  <p id="live" class="partial"></p>
+
+<script>
+  let ws, ctx, stream, src, proc;
+  const out = document.getElementById("out");
+  const live = document.getElementById("live");
+  const startBtn = document.getElementById("start");
+  const stopBtn = document.getElementById("stop");
+
+  function render(msg) {
+    if (msg.type === "partial") {
+      live.textContent = msg.text;
+    } else if (msg.type === "final") {
+      live.textContent = "";
+      const p = document.createElement("p");
+      p.innerHTML = `<span class="speaker">${msg.speaker}</span> <span class="time">${msg.start} – ${msg.end}</span>: `;
+      p.append(document.createTextNode(msg.text));
+      out.append(p);
+    } else if (msg.type === "error") {
+      const p = document.createElement("p");
+      p.className = "error";
+      p.textContent = "Error: " + msg.text;
+      out.append(p);
+    }
+  }
+
+  startBtn.onclick = async () => {
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Ask the browser for 16 kHz so no resampling is needed on our side.
+    ctx = new AudioContext({ sampleRate: 16000 });
+    src = ctx.createMediaStreamSource(stream);
+    // ScriptProcessorNode is deprecated but short and easy to read for a test page.
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+
+    ws = new WebSocket(`ws://${location.host}/transcribe/mic`);
+    ws.onmessage = (e) => render(JSON.parse(e.data));
+
+    proc.onaudioprocess = (e) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const pcm = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      ws.send(pcm.buffer);
+    };
+    src.connect(proc);
+    proc.connect(ctx.destination);
+  };
+
+  stopBtn.onclick = () => {
+    stopBtn.disabled = true;
+    proc.disconnect();
+    stream.getTracks().forEach((t) => t.stop());
+    ws.send("end");
+    ws.onclose = () => {
+      live.textContent = "";
+      startBtn.disabled = false;
+    };
+  };
+</script>
+</body>
+</html>
