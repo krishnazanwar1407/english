@@ -7,6 +7,7 @@
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 720px; }
     button { font-size: 1rem; padding: .5rem 1rem; margin-right: .5rem; }
+    #status { font-family: monospace; font-size: .85rem; background: #f4f4f4; padding: .5rem; margin: 1rem 0; white-space: pre-wrap; }
     #out p { margin: .4rem 0; }
     .speaker { font-weight: 600; }
     .time { color: #888; font-size: .85rem; }
@@ -18,17 +19,37 @@
   <h2>Mic → text</h2>
   <button id="start">Start</button>
   <button id="stop" disabled>Stop</button>
+  <pre id="status">idle</pre>
   <div id="out"></div>
   <p id="live" class="partial"></p>
 
 <script>
   let ws, ctx, stream, src, proc;
+  let chunksSent = 0, bytesSent = 0, peak = 0, silentChunks = 0;
   const out = document.getElementById("out");
   const live = document.getElementById("live");
+  const statusEl = document.getElementById("status");
   const startBtn = document.getElementById("start");
   const stopBtn = document.getElementById("stop");
 
+  // Shows what the page knows, so you can see where audio stops on a machine you can't open the console on.
+  const info = { mic: "-", sampleRate: "-", socket: "not connected", serverMessages: 0, chunksSent: 0, bytesSent: 0, peak: 0, silentChunks: 0, lastEvent: "-" };
+  function updateStatus(event) {
+    if (event) info.lastEvent = event;
+    info.chunksSent = chunksSent;
+    info.bytesSent = bytesSent;
+    info.peak = peak.toFixed(3);
+    info.silentChunks = silentChunks;
+    statusEl.textContent = Object.entries(info).map(([k, v]) => `${k}: ${v}`).join("\n");
+  }
+
+  function log(...args) {
+    console.log("[mic-test]", ...args);
+    updateStatus(args.join(" "));
+  }
+
   function render(msg) {
+    info.serverMessages++;
     if (msg.type === "partial") {
       live.textContent = msg.text;
     } else if (msg.type === "final") {
@@ -43,33 +64,63 @@
       p.textContent = "Error: " + msg.text;
       out.append(p);
     }
+    updateStatus("server message: " + msg.type);
   }
 
   startBtn.onclick = async () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunksSent = bytesSent = peak = silentChunks = 0;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      log("mic access failed:", err.name, err.message);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      return;
+    }
+    info.mic = stream.getAudioTracks()[0].label || "(no label)";
     // Ask the browser for 16 kHz so no resampling is needed on our side.
     ctx = new AudioContext({ sampleRate: 16000 });
+    info.sampleRate = ctx.sampleRate;
+    if (ctx.state === "suspended") await ctx.resume();
     src = ctx.createMediaStreamSource(stream);
     // ScriptProcessorNode is deprecated but short and easy to read for a test page.
     proc = ctx.createScriptProcessor(4096, 1, 1);
 
     ws = new WebSocket(`ws://${location.host}/transcribe/mic`);
+    info.socket = "connecting";
+    ws.onopen = () => { info.socket = "open"; log("websocket open"); };
     ws.onmessage = (e) => render(JSON.parse(e.data));
+    ws.onerror = () => log("websocket error (see console)");
+    ws.onclose = (e) => {
+      info.socket = `closed (code ${e.code}${e.reason ? ", " + e.reason : ""})`;
+      log("websocket closed");
+      live.textContent = "";
+      startBtn.disabled = false;
+    };
 
     proc.onaudioprocess = (e) => {
       if (ws.readyState !== WebSocket.OPEN) return;
       const input = e.inputBuffer.getChannelData(0);
       const pcm = new Int16Array(input.length);
+      let chunkPeak = 0;
       for (let i = 0; i < input.length; i++) {
         const s = Math.max(-1, Math.min(1, input[i]));
+        chunkPeak = Math.max(chunkPeak, Math.abs(s));
         pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
+      // A peak near 0 means the browser is getting silence from this microphone.
+      peak = Math.max(peak, chunkPeak);
+      if (chunkPeak < 0.001) silentChunks++;
       ws.send(pcm.buffer);
+      chunksSent++;
+      bytesSent += pcm.buffer.byteLength;
+      if (chunksSent % 20 === 0) updateStatus();
     };
     src.connect(proc);
     proc.connect(ctx.destination);
+    log("mic streaming started");
   };
 
   stopBtn.onclick = () => {
@@ -77,11 +128,10 @@
     proc.disconnect();
     stream.getTracks().forEach((t) => t.stop());
     ws.send("end");
-    ws.onclose = () => {
-      live.textContent = "";
-      startBtn.disabled = false;
-    };
+    log("sent end, waiting for final results");
   };
+
+  updateStatus();
 </script>
 </body>
 </html>
