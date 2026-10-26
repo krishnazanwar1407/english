@@ -32,7 +32,7 @@ MAX_SPEAKERS = 2
 API_VERSION = "2025-10-15"
 SPEECH_SCOPE = "https://cognitiveservices.azure.com/.default"
 
-BLOB_BASE = "https://cirrusplat57766bz5d1.blob.core.windows.net/evaluation"
+BLOB_BASE = "https://.blob.core.windows.net/evaluation"
 REGION = "apac"
 
 # False turns off TLS certificate verification for both the token request and the
