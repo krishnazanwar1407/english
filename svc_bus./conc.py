@@ -214,6 +214,7 @@ except Exception:
 
 METRICS_PREFIX = "SBMETRICS"
 POD_NAME = os.getenv("HOSTNAME") or socket.gethostname()
+# Also see APP_SB_METRICS_FILE below (optional file output).
 # Seconds between `monitor` lines. 0 turns the monitor off.
 MONITOR_SECONDS = float(os.getenv("APP_SB_MONITOR_SECONDS", "30"))
 
@@ -236,13 +237,40 @@ def _utc_iso(epoch):
     return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat(timespec="milliseconds")
 
 
+# Optional: ALSO write every metric as a plain JSON line to this file (JSON Lines),
+# e.g. APP_SB_METRICS_FILE=metrics/run1.jsonl. Handy locally when the app is
+# started from VS Code and there is no shell to redirect. Not set = off.
+# The file is appended to; pandas: pd.read_json(path, lines=True)
+METRICS_FILE = os.getenv("APP_SB_METRICS_FILE")
+_metrics_file = None
+_metrics_file_lock = threading.Lock()
+
+
+def _write_metrics_file(line):
+    """Append one JSON line to APP_SB_METRICS_FILE if it is set. NEVER RAISES."""
+    global _metrics_file
+    if not METRICS_FILE:
+        return
+    try:
+        with _metrics_file_lock:
+            if _metrics_file is None:
+                folder = os.path.dirname(os.path.abspath(METRICS_FILE))
+                os.makedirs(folder, exist_ok=True)
+                _metrics_file = open(METRICS_FILE, "a", encoding="utf-8", buffering=1)  # line-buffered
+            _metrics_file.write(line + "\n")
+    except Exception:
+        pass
+
+
 def log_metric(event, **fields):
-    """Write one SBMETRICS JSON line. NEVER RAISES."""
+    """Write one SBMETRICS JSON line (and to APP_SB_METRICS_FILE if set). NEVER RAISES."""
     try:
         now = time.time()
         record = {"event": event, "ts": _utc_iso(now), "ts_epoch": round(now, 3), "pod": POD_NAME}
         record.update(fields)
-        logger.info(f"{METRICS_PREFIX} {json.dumps(record, default=str, separators=(',', ':'))}")
+        line = json.dumps(record, default=str, separators=(',', ':'))
+        logger.info(f"{METRICS_PREFIX} {line}")
+        _write_metrics_file(line)
     except Exception:
         pass
 
