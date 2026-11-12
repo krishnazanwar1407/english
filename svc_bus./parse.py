@@ -8,12 +8,15 @@ Run:
     Locally, with APP_SB_METRICS_FILE=metrics/run1.jsonl set for the app:
     python parse_sb_metrics.py metrics/run1.jsonl --run sent_runs/<run_id>/sent_messages.json
 
-Writes one CSV per event into --out (default metrics_out):
+Writes one CSV per event into --out. Default: with --run, the run's own folder
+(sent_runs/<run_id>/metrics_out/, next to sent_messages.json); without --run, ./metrics_out:
     message_summary.csv   one row per message: all timestamps, durations, outcome
     monitor.csv           memory / in_flight / counters over time
     message_accepted.csv, message_processed.csv, message_sent.csv, listener_started.csv
 
-With --run, message_summary.csv is limited to that run's message_ids and gets a
+With --run, the message_* CSVs are limited to that run's message_ids (monitor.csv
+and listener_started.csv keep every line: they are per process, not per message),
+message_summary.csv gets a
 `sender_sent_at` / `sender_sent_epoch` column from the sender's file, and
 missing_messages.csv lists the ids that were sent but never showed up in the logs.
 
@@ -69,8 +72,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("logs", nargs="+", help="log files")
     parser.add_argument("--run", help="sent_messages.json written by send_test_messages.py")
-    parser.add_argument("--out", default="metrics_out")
+    parser.add_argument("--out", default=None,
+                        help="output folder (default: <run folder>/metrics_out with --run, else ./metrics_out)")
     args = parser.parse_args()
+    if args.out is None:
+        args.out = os.path.join(os.path.dirname(os.path.abspath(args.run)), "metrics_out") if args.run else "metrics_out"
 
     events = defaultdict(list)
     seen = set()
@@ -90,6 +96,8 @@ def main():
         with open(args.run, encoding="utf-8") as f:
             run = json.load(f)
         sent = {m["message_id"]: m for m in run["messages"] if m.get("ok")}
+        for per_message in ("message_accepted", "message_processed", "message_sent"):
+            events[per_message] = [r for r in events.get(per_message, []) if r.get("message_id") in sent]
         summaries = [r for r in events.get("message_summary", []) if r.get("message_id") in sent]
         for r in summaries:
             r["sender_sent_at"] = sent[r["message_id"]]["sent_at"]
