@@ -3,19 +3,21 @@ Send N test messages to the IN queue, for load testing svc_bus_v5_with_logs.
 
 Run:
     python send_test_messages.py --file message.json --count 50
-    python send_test_messages.py --file message.json --count 200 --interval 0.5 --unique-job-id
+    python send_test_messages.py --file message.json --count 200 --interval 0.5
 
   --file           JSON file with the message body. Either one object (sent N
                    times) or a list of objects (cycled through: 1st, 2nd, ...).
   --count          how many messages to send (N)
   --interval       seconds to wait between sends (default 0 = as fast as possible)
-  --unique-job-id  replace "job_id" in each body with the message's unique id,
-                   so every message has its own job_id in the listener logs
+  --keep-job-id    keep the job_id from the file. By default every message's
+                   "job_id" is REPLACED by its message_id, so each message has
+                   its own job_id in the listener logs.
   --queue          default: env APP_SERVICE_IN_QUEUE
   --namespace      default: env APP_SB_FULLY_QUALIFIED_NAMESPACE
   --out-dir        default: sent_runs
 
-Every message gets a unique message_id  <run_id>-<00001>  and the application
+Every message gets a unique message_id  <run_id>-00001, <run_id>-00002, ...
+its body's job_id is set to that same id, and it gets the application
 property  test_run_id=<run_id>, which the listener logs, so you can filter
 the SBMETRICS lines of one run.
 
@@ -66,7 +68,8 @@ def main():
     parser.add_argument("--file", required=True, help="JSON file with the message body (object or list of objects)")
     parser.add_argument("--count", type=int, required=True, help="number of messages to send")
     parser.add_argument("--interval", type=float, default=0.0, help="seconds between sends (default 0)")
-    parser.add_argument("--unique-job-id", action="store_true", help="set job_id in each body to its message_id")
+    parser.add_argument("--keep-job-id", action="store_true",
+                        help="keep job_id from the file (default: job_id is replaced by the message_id)")
     parser.add_argument("--queue", default=os.getenv("APP_SERVICE_IN_QUEUE"))
     parser.add_argument("--namespace", default=os.getenv("APP_SB_FULLY_QUALIFIED_NAMESPACE"))
     parser.add_argument("--out-dir", default="sent_runs")
@@ -92,7 +95,7 @@ def main():
         "count_sent": 0,
         "count_failed": 0,
         "interval_seconds": args.interval,
-        "unique_job_id": args.unique_job_id,
+        "job_id_replaced": not args.keep_job_id,
         "started_at": utc_iso(time.time()),
         "finished_at": None,
         "message_ids": [],
@@ -108,7 +111,7 @@ def main():
             for i in range(1, args.count + 1):
                 message_id = f"{run_id}-{i:05d}"
                 body = json.loads(json.dumps(bodies[(i - 1) % len(bodies)]))   # fresh copy
-                if args.unique_job_id and isinstance(body, dict):
+                if not args.keep_job_id and isinstance(body, dict):
                     body["job_id"] = message_id
                 job_id = body.get("job_id") if isinstance(body, dict) else None
                 entry = {"index": i, "message_id": message_id, "job_id": job_id,
