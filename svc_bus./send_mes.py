@@ -16,17 +16,18 @@ Run:
   --namespace      default: env APP_SB_FULLY_QUALIFIED_NAMESPACE
   --out-dir        default: sent_runs
 
-Every message gets a unique message_id  <run_id>-00001, <run_id>-00002, ...
-its body's job_id is set to that same id, and it gets the application
+Every message gets a unique message_id (a UUID, same format as your job_id),
+its body's job_id is set to that same UUID, and it gets the application
 property  test_run_id=<run_id>, which the listener logs, so you can filter
-the SBMETRICS lines of one run.
+the SBMETRICS lines of one run. The order they were sent in is the "index"
+in sent_messages.json.
 
 The list of sent ids is saved to  <out-dir>/<run_id>/sent_messages.json :
     {
       "run_id": "...", "queue": "...", "namespace": "...", "source_file": "...",
       "count_requested": N, "count_sent": n, "count_failed": f,
       "started_at": "...", "finished_at": "...",
-      "message_ids": ["<run_id>-00001", ...],
+      "message_ids": ["<uuid>", ...],
       "messages": [{"index": 1, "message_id": "...", "job_id": "...",
                     "sent_at": "...", "sent_epoch": 0.0, "ok": true, "error": null}, ...]
     }
@@ -109,7 +110,7 @@ def main():
         with ServiceBusClient(args.namespace, credential) as client, \
                 client.get_queue_sender(queue_name=args.queue) as sender:
             for i in range(1, args.count + 1):
-                message_id = f"{run_id}-{i:05d}"
+                message_id = str(uuid.uuid4())
                 body = json.loads(json.dumps(bodies[(i - 1) % len(bodies)]))   # fresh copy
                 if not args.keep_job_id and isinstance(body, dict):
                     body["job_id"] = message_id
