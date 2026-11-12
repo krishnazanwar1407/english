@@ -5,6 +5,9 @@ Run:
     kubectl logs <pod> > pod.log           (or export the logs from Azure Monitor)
     python parse_sb_metrics.py pod.log [more.log ...] [--run sent_runs/<run_id>/sent_messages.json] [--out metrics_out]
 
+    Locally, with APP_SB_METRICS_FILE=metrics/run1.jsonl set for the app:
+    python parse_sb_metrics.py metrics/run1.jsonl --run sent_runs/<run_id>/sent_messages.json
+
 Writes one CSV per event into --out (default metrics_out):
     message_summary.csv   one row per message: all timestamps, durations, outcome
     monitor.csv           memory / in_flight / counters over time
@@ -30,6 +33,14 @@ _decoder = json.JSONDecoder()
 def parse_line(line):
     i = line.find(PREFIX)
     if i < 0:
+        # A plain JSON line, as written to APP_SB_METRICS_FILE
+        stripped = line.strip()
+        if stripped.startswith("{"):
+            try:
+                obj = json.loads(stripped)
+                return obj if isinstance(obj, dict) and "event" in obj else None
+            except ValueError:
+                return None
         return None
     text = line[i + len(PREFIX):]
     for candidate in (text, text.replace('\\"', '"'), text.replace('""', '"')):
