@@ -9,9 +9,8 @@ Run:
 Needs nothing but Python; the report is one HTML file (open it in a browser, needs internet
 for the chart library). It also writes  <out>_summary.csv  with the numbers table.
 
-Worker count of a run: `max_in_flight` from listener_started.csv in the same folder (what the
-listener was configured with). If that file is missing: the highest worker_id seen, which
-undercounts when a run had fewer messages than workers - you get a warning then.
+Worker count of a run: the highest worker_id in its message_summary.csv. If listener_started.csv
+is next to it and says a different max_in_flight, a NOTE is printed (nothing else changes).
 
 Charts (all runs overlaid, one colour per run, sorted by worker count):
   1. Messages finished over time - the slope is the throughput. Steeper = faster.
@@ -60,17 +59,16 @@ def load_run(summary_path):
     # Run name: the folder above metrics_out (= the run_id), else the folder itself.
     run_name = os.path.basename(os.path.dirname(folder)) if os.path.basename(folder) == "metrics_out" else os.path.basename(folder)
 
+    # Worker count = the highest worker_id in the summary.
+    worker_ids = [int(num(r.get("worker_id"))) for r in rows if num(r.get("worker_id")) is not None]
+    if not worker_ids:
+        raise SystemExit(f"{summary_path}: no worker_id values")
+    workers, source = max(worker_ids), "highest worker_id"
+    # Only a cross-check: if the listener was configured with a different number, say so.
     started = read_csv(os.path.join(folder, "listener_started.csv"))
-    configured = [int(num(r.get("max_in_flight"))) for r in started if num(r.get("max_in_flight"))]
-    max_worker_id = max(int(num(r["worker_id"])) for r in rows if num(r.get("worker_id")))
-    if configured:
-        workers, source = max(configured), "max_in_flight"
-        if len(set(configured)) > 1:
-            print(f"  WARNING {run_name}: listener started with different max_in_flight values {sorted(set(configured))}; using {workers}")
-    else:
-        workers, source = max_worker_id, "highest worker_id"
-        print(f"  WARNING {run_name}: no listener_started.csv next to it; worker count {workers} taken from the highest "
-              f"worker_id (too low if the run had fewer messages than workers)")
+    configured = sorted({int(num(r.get("max_in_flight"))) for r in started if num(r.get("max_in_flight"))})
+    if configured and configured != [workers]:
+        print(f"  NOTE {run_name}: highest worker_id is {workers}, listener_started.csv says max_in_flight={configured}")
 
     # Time zero = first moment of the run: earliest enqueue (sender) or, if unknown, earliest accept.
     enqueued = [num(r.get("enqueued_epoch")) for r in rows if num(r.get("enqueued_epoch"))]
