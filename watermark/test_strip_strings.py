@@ -97,6 +97,53 @@ def test_input_not_mutated():
     assert data == original
 
 
+def _all_containers(obj):
+    """Yield every dict/list/set inside obj (including obj itself)."""
+    if isinstance(obj, (dict, list, set)):
+        yield obj
+    if isinstance(obj, dict):
+        for value in obj.values():
+            yield from _all_containers(value)
+    elif isinstance(obj, (list, set)):
+        for item in obj:
+            yield from _all_containers(item)
+
+
+def test_result_shares_no_containers_with_input():
+    data = {"a": [1, {"b": ["c", {"d": []}]}], "e": {}, "s": {1, 2}, "x": [[[]]]}
+    result = remove_substring(data, "zzz")  # no match on purpose: result looks identical
+
+    assert result == data
+    original_ids = {id(c) for c in _all_containers(data)}
+    result_ids = {id(c) for c in _all_containers(result)}
+    assert original_ids.isdisjoint(result_ids)
+
+
+def test_mutating_result_does_not_touch_original():
+    data = {"foo_a": [1, {"foo_b": ["foo_c"]}], "tags": {"x", "y"}}
+    original = copy.deepcopy(data)
+
+    result = remove_substring(data, "foo_")
+    result["a"].append(99)
+    result["a"][1]["b"].append("new")
+    result["a"][1]["b"][0] = "changed"
+    result["tags"].add("z")
+    result["brand_new_key"] = "v"
+
+    assert data == original
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{"foo_k": "foo_v"}, ["foo_a", ["foo_b"]], "foo_s"],
+)
+def test_returns_same_type_and_new_object(data):
+    result = remove_substring(data, "foo_")
+    assert type(result) is type(data)
+    if not isinstance(data, str):  # equal strings may be interned by Python; strings can't be mutated anyway
+        assert result is not data
+
+
 def test_very_deep_nesting():
     data = leaf = {}
     for _ in range(200):
