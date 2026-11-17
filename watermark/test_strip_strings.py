@@ -27,6 +27,38 @@ def test_basic_replacements(data, target, expected):
     assert remove_substring(data, target) == expected
 
 
+@pytest.mark.parametrize(
+    "data, target, expected",
+    [
+        # plain string input
+        ("foo_bob", "foo_", "bob"),
+        ("no match here", "zzz", "no match here"),
+        ("", "x", ""),
+        # list input
+        (["foo_a", "b", "foo_foo_c"], "foo_", ["a", "b", "c"]),
+        ([1, None, "x1"], "1", [1, None, "x"]),
+        ([], "x", []),
+        # list containing dicts and nested lists
+        (
+            ["foo_a", {"foo_k": ["foo_v", {"foo_deep": "foo_x"}]}, [["foo_z"]]],
+            "foo_",
+            ["a", {"k": ["v", {"deep": "x"}]}, [["z"]]],
+        ),
+    ],
+)
+def test_string_and_list_inputs(data, target, expected):
+    result = remove_substring(data, target)
+    assert result == expected
+    assert type(result) is type(data)
+
+
+def test_list_input_not_mutated():
+    data = ["rm_a", {"rm_b": ["rm_c"]}]
+    original = copy.deepcopy(data)
+    remove_substring(data, "rm_")
+    assert data == original
+
+
 def test_nested_keys_and_values():
     data = {"x_l1": {"x_l2": {"x_l3": {"x_l4": "x_leaf"}}}}
     assert remove_substring(data, "x_") == {"l1": {"l2": {"l3": {"l4": "leaf"}}}}
