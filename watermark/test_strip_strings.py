@@ -1,0 +1,78 @@
+import copy
+
+import pytest
+
+from strip_strings import remove_substring
+
+
+@pytest.mark.parametrize(
+    "data, target, expected",
+    [
+        # values only
+        ({"a": "hello world", "b": "worldwide"}, "world", {"a": "hello ", "b": "wide"}),
+        # keys get replaced too
+        ({"foo_name": "foo_bob", "id": 1}, "foo_", {"name": "bob", "id": 1}),
+        # multiple occurrences in one string
+        ({"a,b": "a,b,c,d"}, ",", {"ab": "abcd"}),
+        # case sensitive
+        ({"Foo foo": "Foo foo FOO"}, "foo", {"Foo ": "Foo  FOO"}),
+        # special characters are literal, not regex
+        ({"a.*b": "c.*d"}, ".*", {"ab": "cd"}),
+        ({"C:\\tmp": "C:\\x"}, "\\", {"C:tmp": "C:x"}),
+        # empty dict
+        ({}, "x", {}),
+    ],
+)
+def test_basic_replacements(data, target, expected):
+    assert remove_substring(data, target) == expected
+
+
+def test_nested_keys_and_values():
+    data = {"x_l1": {"x_l2": {"x_l3": {"x_l4": "x_leaf"}}}}
+    assert remove_substring(data, "x_") == {"l1": {"l2": {"l3": {"l4": "leaf"}}}}
+
+
+def test_lists_inside_dicts():
+    data = {
+        "foo_users": [
+            {"foo_name": "foo-bob", "tags": ["foo", "bar-foo", ["nested-foo"]]},
+            {"name": "alice", "meta": {"foo_notes": ["foofoo", "ok"]}},
+        ]
+    }
+    expected = {
+        "_users": [
+            {"_name": "-bob", "tags": ["", "bar-", ["nested-"]]},
+            {"name": "alice", "meta": {"_notes": ["", "ok"]}},
+        ]
+    }
+    assert remove_substring(data, "foo") == expected
+
+
+def test_non_string_keys_and_values_untouched():
+    data = {1: "a1a", "n1": None, "f": 2.5, "b": True, "i": 1}
+    assert remove_substring(data, "1") == {1: "aa", "n": None, "f": 2.5, "b": True, "i": 1}
+
+
+def test_no_match_unchanged():
+    data = {"a": "abc", "b": ["def"], "c": {"d": "e"}}
+    assert remove_substring(data, "zzz") == data
+
+
+def test_input_not_mutated():
+    data = {"rm_a": ["rm_b", {"rm_c": "rm_d"}]}
+    original = copy.deepcopy(data)
+    remove_substring(data, "rm_")
+    assert data == original
+
+
+def test_very_deep_nesting():
+    data = leaf = {}
+    for _ in range(200):
+        leaf["DEEPn"] = {}
+        leaf = leaf["DEEPn"]
+    leaf["DEEPv"] = "DEEPvalue"
+
+    node = remove_substring(data, "DEEP")
+    for _ in range(200):
+        node = node["n"]
+    assert node == {"v": "value"}
